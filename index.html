@@ -797,16 +797,18 @@ function render(){
  if(streetMap){streetMap.remove();streetMap=null;}
  el('#view').innerHTML='<h1 class="heading">'+title(v)+'</h1>'+({overview,agents:agentView,search:searchView,clients:mapView,analytics,reports,journal,settings}[v])();el('#notice').textContent=lastMessage;if(v==='clients'&&workspace)initStreetMap();
 }
-function login(){el('#loginTitle').textContent=L('Вход в центр','Markazga kirish');el('#keyLabel').textContent=L('Ключ оператора','Operator kaliti');el('#enter').textContent=L('Войти','Kirish');el('#cancel').textContent=L('Отмена','Bekor qilish');el('#loginError').textContent='';el('#key').value='';el('#login').showModal();}
+function login(){el('#loginTitle').textContent=L('Вход в центр','Markazga kirish');const paired=!!localStorage.getItem('fadena_device');el('#key').inputMode=paired?'numeric':'text';el('#keyLabel').textContent=paired?L('PIN этого браузера','Brauzer PIN-kodi'):L('Первый вход: вставьте ключ оператора, чтобы подтвердить личный браузер','Birinchi kirish: shaxsiy brauzerni tasdiqlash uchun operator kalitini kiriting');el('#enter').textContent=L('Войти','Kirish');el('#cancel').textContent=L('Отмена','Bekor qilish');el('#loginError').textContent='';el('#key').value='';el('#login').showModal();}
 el('#credentials').onsubmit=async e=>{
  e.preventDefault();
  const candidate=el('#key').value.trim(),dialog=el('#login'),enter=el('#enter');
  if(!candidate||enter.disabled)return;
  enter.disabled=true;el('#loginError').textContent='';
  try{
-  await api('session',{operatorKey:candidate});
+  const device=localStorage.getItem('fadena_device');
+  const result=device?await api('device/unlock',{operatorKey:device,body:{pin:candidate}}):await api('device/register',{operatorKey:candidate,body:{}});
+  if(result.device)localStorage.setItem('fadena_device',result.device);
   if(!dialog.open)return;
-  key=candidate;epoch++;const version=epoch;
+  key=result.session;epoch++;const version=epoch;
   el('#key').value='';dialog.close();
   const [data,integration]=await Promise.allSettled([api('workspace'),api('integration')]);
   if(version!==epoch)return;
@@ -815,7 +817,8 @@ el('#credentials').onsubmit=async e=>{
   lastMessage=!workspace?L('Вход выполнен. Данные центра временно недоступны.','Kirish muvaffaqiyatli. Markaz ma’lumotlari hozir mavjud emas.'):!tg?L('Вход выполнен. Настройки интеграций временно недоступны.','Kirish muvaffaqiyatli. Integratsiya sozlamalari hozir mavjud emas.'):'';
   render();
  }catch(err){
-  el('#loginError').textContent=err.message==='auth'?L('Неверный ключ оператора. Скопируйте ключ целиком.','Operator kaliti noto‘g‘ri. Kalitni to‘liq nusxalang.'):err.message==='operator_key_missing'?L('Вход ещё не настроен: в тестовом Worker отсутствует ключ оператора.','Kirish sozlanmagan: sinov Worker xizmatida operator kaliti mavjud emas.'):L('Сервер авторизации недоступен. Проверьте соединение и повторите вход.','Kirish serveri mavjud emas. Ulanishni tekshirib, qayta urining.');
+  if(err.message==='device_invalid'){localStorage.removeItem('fadena_device');dialog.close();login();}
+  el('#loginError').textContent=err.message==='pin_invalid'?L('Неверный PIN.','PIN noto‘g‘ri.'):err.message==='pin_limited'?L('Слишком много попыток. Повторите через 10 минут.','10 daqiqadan keyin urining.'):err.message==='device_invalid'?L('Подтвердите браузер снова.','Brauzerni qayta tasdiqlang.'):err.message==='auth'?L('Неверный ключ оператора. Скопируйте ключ целиком.','Operator kaliti noto‘g‘ri. Kalitni to‘liq nusxalang.'):err.message==='operator_key_missing'?L('Вход ещё не настроен: в тестовом Worker отсутствует ключ оператора.','Kirish sozlanmagan: sinov Worker xizmatida operator kaliti mavjud emas.'):L('Сервер авторизации недоступен. Проверьте соединение и повторите вход.','Kirish serveri mavjud emas. Ulanishni tekshirib, qayta urining.');
   el('#key').select();
  }finally{enter.disabled=false;}
 };
