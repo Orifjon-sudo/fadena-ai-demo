@@ -45,7 +45,7 @@ async function api(path,opts={}){
  const r=await fetch(API+path,{method:opts.body?'POST':'GET',credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer',headers:{...(token?{Authorization:'Bearer '+token}:{}),...(opts.body?{'Content-Type':'application/json'}:{})},body:opts.body&&JSON.stringify(opts.body),signal:AbortSignal.timeout(55000)});
  if(epoch!==session)throw Error('session');
  if(r.status===401){clearSession();throw Error('auth');}
- if(!r.ok)throw Error(String(r.status));
+ if(!r.ok){const data=await r.json().catch(()=>({}));throw Error(data.error||String(r.status));}
  return opts.file?r.blob():r.json();
 }
 async function refresh(){
@@ -78,7 +78,12 @@ function analytics(){
  return metrics([[leads.length,L('Кандидаты','Nomzodlar')],[contact.length,L('С публичным контактом','Ochiq kontaktli')],[leads.filter(x=>x.stage==='Проверен').length,L('Проверенные организации','Tekshirilgan tashkilotlar')],['—',L('Подтверждение контактов не ведётся','Kontaktlar tasdig‘i qayd etilmaydi')]])+pane('<h2>'+L('Очередь квалификации','Saralash navbati')+'</h2><p>'+L('Есть опубликованный контакт. Закупочный интерес требует проверки.','Ochiq kontakt mavjud. Xaridga qiziqish tekshirilishi kerak.')+'</p>'+contact.map(x=>'<div class="row"><strong>'+esc(x.name)+'</strong>'+esc([x.city,x.phone,x.website].filter(Boolean).join(' · '))+'</div>').join(''));}
 function reports(){if(!workspace)return gate();return pane((workspace.reports.length?workspace.reports.map(r=>'<div class="row"><strong>'+L('Отчёт','Hisobot')+' '+esc(r.kind.toUpperCase())+'</strong><p>'+L('Данные по состоянию на','Ma’lumotlar sanasi')+' '+dates(r.as_of)+'</p>'+button('file-'+r.kind,L('Скачать','Yuklab olish'))+'</div>').join(''):L('Отчёты ещё не сформированы.','Hisobotlar hali tuzilmagan.')));}
 function journal(){if(!workspace)return gate();return pane(workspace.runs.map(r=>'<article class="row"><small>'+dates(r.started_at)+' · Asia/Tashkent</small><strong>'+esc(status?.markets[r.country]?.cities[r.city]?.[0]||r.city)+' · '+(r.status==='success'?L('Завершено','Yakunlangan'):L('Ошибка','Xato'))+'</strong>'+L('Найдено','Topildi')+' '+r.total+' · '+L('Новых','Yangi')+' '+r.created+(r.error?'<p>'+esc(r.error)+'</p>':'')+'</article>').join('')||L('Запусков пока нет.','Hozircha ishlar yo‘q.'));}
-function settings(){return pane('<div class="row"><strong>Cloudflare Worker / D1</strong>'+connection()+'</div><div class="row"><strong>Telegram · '+L('тестовый бот','sinov boti')+'</strong>'+(status?(status.telegram?L('Секреты настроены; доставка проверяется отдельно','Sirlar sozlangan; yetkazish alohida tekshiriladi'):L('Не настроен','Sozlanmagan')):'—')+'</div>'+button('refresh',L('Обновить состояние','Holatni yangilash')));}
+let tg=null;
+function settings(){
+ if(!key)return pane(button('login',L('Войти для настройки Telegram','Telegram sozlamalariga kirish')));
+ const row=(label,value)=>'<div class="row"><strong>'+label+'</strong><span>'+esc(value||'—')+'</span></div>';
+ return pane('<h2>'+L('Настройки интеграций','Integratsiya sozlamalari')+'</h2><p>'+connection()+'</p><label>'+L('Имя второго тестового бота','Ikkinchi sinov botining nomi')+' <input id="tgName" placeholder="@example_test_bot" value="'+esc(tg?.name||'')+'"></label><p><label>'+L('Адрес Cloudflare Worker','Cloudflare Worker manzili')+' <input id="tgWorker" type="url" value="'+esc(tg?.worker||new URL(API).origin)+'"></label></p>'+row('Cloudflare Secrets · TEST_BOT_TOKEN',tg?(tg.token?L('Есть','Mavjud'):L('Отсутствует','Mavjud emas')):null)+row('Telegram webhook',tg?.hook||L('Не проверен','Tekshirilmagan'))+row(L('Последняя успешная проверка','Oxirgi muvaffaqiyatli tekshiruv'),tg?.success&&new Date(tg.success).toLocaleString(lang))+row(L('Последняя ошибка','Oxirgi xato'),tg?.error)+button('tg-save',L('Сохранить настройки','Sozlamalarni saqlash'))+button('tg-check',L('Проверить подключение','Ulanishni tekshirish'))+button('tg-send',L('Отправить тестовое сообщение','Sinov xabarini yuborish')));
+}
 function render(){
  const v=page();document.documentElement.lang=lang;document.title=title(v)+' · FADENA AI';
  el('#lang').value=lang;el('#subtitle').textContent=L('ЦЕНТР УПРАВЛЕНИЯ','BOSHQARUV MARKAZI');
@@ -89,7 +94,7 @@ function render(){
  el('#view').innerHTML='<h1 class="heading">'+title(v)+'</h1>'+({overview,agents:agentView,search:searchView,clients:mapView,analytics,reports,journal,settings}[v])();el('#notice').textContent=lastMessage;
 }
 function login(){el('#loginTitle').textContent=L('Вход в центр','Markazga kirish');el('#keyLabel').textContent=L('Ключ оператора','Operator kaliti');el('#enter').textContent=L('Войти','Kirish');el('#cancel').textContent=L('Отмена','Bekor qilish');el('#loginError').textContent='';el('#key').value='';el('#login').showModal();}
-el('#credentials').onsubmit=async e=>{e.preventDefault();key=el('#key').value.trim();el('#key').value='';el('#enter').disabled=true;try{workspace=await api('workspace');el('#login').close();render();}catch{clearSession();el('#loginError').textContent=L('Вход не выполнен. Проверьте ключ и соединение.','Kirish amalga oshmadi. Kalit va aloqani tekshiring.');}finally{el('#enter').disabled=false;}};
+el('#credentials').onsubmit=async e=>{e.preventDefault();key=el('#key').value.trim();el('#key').value='';el('#enter').disabled=true;try{workspace=await api('workspace');tg=await api('integration');el('#login').close();render();}catch{clearSession();el('#loginError').textContent=L('Вход не выполнен. Проверьте ключ и соединение.','Kirish amalga oshmadi. Kalit va aloqani tekshiring.');}finally{el('#enter').disabled=false;}};
 el('#cancel').onclick=()=>el('#login').close();
 el('#access').onclick=()=>{if(key){clearSession();render();}else login();};
 window.addEventListener('hashchange',()=>{lastMessage='';render();});
@@ -98,6 +103,14 @@ el('#theme').onchange=e=>{document.body.dataset.theme=e.target.value;localStorag
 el('#view').onchange=e=>{if(e.target.id==='region'){region=e.target.value;city=Object.keys(status.markets[region].cities)[0];render();}if(e.target.id==='city')city=e.target.value;if(e.target.id==='category')category=e.target.value;};
 el('#view').onclick=async e=>{
  const id=e.target.closest('[data-action]')?.dataset.action;if(!id)return;
+ if(id.startsWith('tg-')){
+ if(busy)return;
+ if(id==='tg-send'&&!confirm(L('Разрешаете отправить одно сообщение во второй тестовый чат?','Sinov chatiga bitta xabar yuborilsinmi?')))return;
+ const body=id==='tg-save'?{name:el('#tgName').value.trim(),worker:el('#tgWorker').value.trim()}:{confirm:id==='tg-send'};
+ busy=true;
+ try{tg=await api('integration/'+id.slice(3),{body});lastMessage=tg.message||L('Настройки сохранены.','Sozlamalar saqlandi.');}catch(e){lastMessage=e.message==='Failed to fetch'?'Нет связи с Worker.':e.message;}
+ finally{busy=false;render();}return;
+ }
  if(id==='login')return login();if(id==='refresh')return refresh();
  if(id.startsWith('agent-'))selected=Number(id.slice(6));
  if(id==='fit')focusId='';
