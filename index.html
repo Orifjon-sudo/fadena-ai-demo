@@ -710,12 +710,12 @@ const metrics=items=>'<div class="metrics">'+items.map(x=>metric(...x)).join('')
 const options=(pairs,value)=>pairs.map(([k,v])=>'<option value="'+esc(k)+'" '+(k===value?'selected':'')+'>'+esc(v)+'</option>').join('');
 const gate=()=>pane('<p>'+L('Для данных D1 требуется вход.','D1 ma’lumotlari uchun tizimga kiring.')+'</p>'+button('login',L('Войти','Kirish')));
 const dates=x=>new Intl.DateTimeFormat(lang==='ru'?'ru-RU':'uz-UZ',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Tashkent'}).format(new Date(x));
-function clearSession(){key='';workspace=null;focusId='';epoch++;lastMessage='';}
+function clearSession(){key='';workspace=null;tg=null;focusId='';epoch++;lastMessage='';}
 async function api(path,opts={}){
- const session=epoch,token=key;
+ const session=epoch,token=opts.operatorKey??key;
  const r=await fetch(API+path,{method:opts.body?'POST':'GET',credentials:'omit',cache:'no-store',referrerPolicy:'no-referrer',headers:{...(token?{Authorization:'Bearer '+token}:{}),...(opts.body?{'Content-Type':'application/json'}:{})},body:opts.body&&JSON.stringify(opts.body),signal:AbortSignal.timeout(55000)});
  if(epoch!==session)throw Error('session');
- if(r.status===401){clearSession();throw Error('auth');}
+ if(r.status===401){if(!opts.operatorKey&&key){clearSession();render();}throw Error('auth');}
  if(!r.ok){const data=await r.json().catch(()=>({}));throw Error(data.error||String(r.status));}
  return opts.file?r.blob():r.json();
 }
@@ -798,7 +798,27 @@ function render(){
  el('#view').innerHTML='<h1 class="heading">'+title(v)+'</h1>'+({overview,agents:agentView,search:searchView,clients:mapView,analytics,reports,journal,settings}[v])();el('#notice').textContent=lastMessage;if(v==='clients'&&workspace)initStreetMap();
 }
 function login(){el('#loginTitle').textContent=L('Вход в центр','Markazga kirish');el('#keyLabel').textContent=L('Ключ оператора','Operator kaliti');el('#enter').textContent=L('Войти','Kirish');el('#cancel').textContent=L('Отмена','Bekor qilish');el('#loginError').textContent='';el('#key').value='';el('#login').showModal();}
-el('#credentials').onsubmit=async e=>{e.preventDefault();key=el('#key').value.trim();el('#key').value='';el('#enter').disabled=true;try{workspace=await api('workspace');tg=await api('integration');el('#login').close();render();}catch{clearSession();el('#loginError').textContent=L('Вход не выполнен. Проверьте ключ и соединение.','Kirish amalga oshmadi. Kalit va aloqani tekshiring.');}finally{el('#enter').disabled=false;}};
+el('#credentials').onsubmit=async e=>{
+ e.preventDefault();
+ const candidate=el('#key').value.trim(),dialog=el('#login'),enter=el('#enter');
+ if(!candidate||enter.disabled)return;
+ enter.disabled=true;el('#loginError').textContent='';
+ try{
+  await api('session',{operatorKey:candidate});
+  if(!dialog.open)return;
+  key=candidate;epoch++;const version=epoch;
+  el('#key').value='';dialog.close();
+  const [data,integration]=await Promise.allSettled([api('workspace'),api('integration')]);
+  if(version!==epoch)return;
+  workspace=data.status==='fulfilled'?data.value:null;
+  tg=integration.status==='fulfilled'?integration.value:null;
+  lastMessage=!workspace?L('Вход выполнен. Данные центра временно недоступны.','Kirish muvaffaqiyatli. Markaz ma’lumotlari hozir mavjud emas.'):!tg?L('Вход выполнен. Настройки интеграций временно недоступны.','Kirish muvaffaqiyatli. Integratsiya sozlamalari hozir mavjud emas.'):'';
+  render();
+ }catch(err){
+  el('#loginError').textContent=err.message==='auth'?L('Неверный ключ оператора. Скопируйте ключ целиком.','Operator kaliti noto‘g‘ri. Kalitni to‘liq nusxalang.'):err.message==='operator_key_missing'?L('Вход ещё не настроен: в тестовом Worker отсутствует ключ оператора.','Kirish sozlanmagan: sinov Worker xizmatida operator kaliti mavjud emas.'):L('Сервер авторизации недоступен. Проверьте соединение и повторите вход.','Kirish serveri mavjud emas. Ulanishni tekshirib, qayta urining.');
+  el('#key').select();
+ }finally{enter.disabled=false;}
+};
 el('#cancel').onclick=()=>el('#login').close();
 el('#access').onclick=()=>{if(key){clearSession();render();}else login();};
 window.addEventListener('hashchange',()=>{lastMessage='';render();});
